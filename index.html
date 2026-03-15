@@ -702,8 +702,7 @@ main {
   </div>
 
   <script>
-    const CSV_URL = 'https://docs.google.com/spreadsheets/d/1emAXWbsmxsSvlsgiU7W0PeWyrW4iU-rk7fLkal3huUE/export?format=csv&sheet=Prod+Links';
-    const THEME_FILTER = 'Creator & Ecommerce';
+    const API_URL = 'https://script.google.com/macros/s/AKfycbzfZBftcHTSp14_nM7n6pKIdj9AbgLRcXIM2wQtREtNzBuCtHfEdOYEfmDGjAWdfuWNOg/exec';
   </script>
   <script>
 'use strict';
@@ -793,54 +792,31 @@ function loadApps(apps) {
 }
 
 /* ─────────────────────────────────────────
-   Parse CSV rows into apps array
+   Load from API
 ───────────────────────────────────────── */
-function parseAppsFromCSV(rows) {
-  var apps = [];
-  for (var i = 0; i < rows.length; i++) {
-    var row = rows[i];
-    var theme = (row['Theme'] || row['theme'] || '').trim();
-    if (theme !== THEME_FILTER) continue;
-    var title      = (row['Web App Name'] || row['Title'] || row['Name'] || '').trim();
-    var url        = (row['Prod Link']    || row['URL']   || row['Link'] || '').trim();
-    var category   = ((row['Category'] || row['Cat'] || row['Group'] || row['Type'] || '').trim()) || 'Tools';
-    var purpose    = (row['Purpose'] || row['Description'] || row['Desc'] || '').trim();
-    var screenshot = (row['Screenshot']  || row['Image']  || row['Preview'] || '').trim();
-    if (!title || !url) continue;
-    apps.push({ title: title, category: category, url: url, purpose: purpose, screenshot: screenshot });
-  }
-  return apps;
-}
-
-/* ─────────────────────────────────────────
-   Load from CSV
-───────────────────────────────────────── */
-function loadFromCSV() {
+function loadFromAPI() {
   showState('loading');
-  Papa.parse(CSV_URL, {
-    download: true,
-    header: true,
-    complete: function(results) {
-      var apps = parseAppsFromCSV(results.data);
-      if (apps.length === 0) {
+  fetch(API_URL)
+    .then(function(r) { return r.json(); })
+    .then(function(apps) {
+      if (!Array.isArray(apps) || apps.length === 0) {
         errorMessage.textContent = 'No tools found. Check the spreadsheet.';
         showState('error');
       } else {
         loadApps(apps);
       }
-    },
-    error: function(err) {
+    })
+    .catch(function(err) {
       errorMessage.textContent = err.message || 'Failed to load tools.';
       showState('error');
-    }
-  });
+    });
 }
 
 /* ─────────────────────────────────────────
    Refresh
 ───────────────────────────────────────── */
 function refreshApps() {
-  loadFromCSV();
+  loadFromAPI();
 }
 
 /* ─────────────────────────────────────────
@@ -1149,11 +1125,9 @@ refreshBtn.addEventListener('click', function() {
 retryBtn.addEventListener('click', refreshApps);
 
 /* ─────────────────────────────────────────
-   Boot — load from CSV
+   Boot — load from API
 ───────────────────────────────────────── */
-loadFromCSV();
+loadFromAPI();
 </script>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 </body>
 </html>

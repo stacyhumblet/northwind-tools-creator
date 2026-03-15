@@ -1,0 +1,416 @@
+<script>
+'use strict';
+
+/* ─────────────────────────────────────────
+   Category → Material Symbol icon mapping
+───────────────────────────────────────── */
+const CATEGORY_ICONS = {
+  'default':      'widgets',
+  'reporting':    'bar_chart',
+  'report':       'bar_chart',
+  'analytics':    'analytics',
+  'finance':      'payments',
+  'hr':           'people',
+  'ops':          'settings',
+  'operations':   'settings',
+  'marketing':    'campaign',
+  'sales':        'trending_up',
+  'engineering':  'code',
+  'tech':         'code',
+  'data':         'database',
+  'tools':        'build',
+  'admin':        'admin_panel_settings',
+  'compliance':   'verified_user',
+  'legal':        'gavel',
+  'support':      'support_agent',
+  'content':      'article',
+  'media':        'play_circle',
+  'scheduling':   'calendar_month',
+  'dashboard':    'dashboard',
+  'workflow':     'account_tree',
+  'automation':   'smart_toy',
+};
+
+/* ─────────────────────────────────────────
+   Northwind-themed accent palette
+   (Navy/Teal family + harmonious accents)
+───────────────────────────────────────── */
+const ACCENTS = [
+  { color: '#5a9fc2', dim: 'rgba(90,159,194,0.15)'  },  // teal (brand primary)
+  { color: '#34a08e', dim: 'rgba(52,160,142,0.15)'  },  // teal-green
+  { color: '#6a8bc9', dim: 'rgba(106,139,201,0.15)' },  // blue-violet
+  { color: '#c9a84c', dim: 'rgba(201,168,76,0.15)'  },  // warm gold
+  { color: '#3ab8cc', dim: 'rgba(58,184,204,0.15)'  },  // cyan-teal
+  { color: '#8a7fc9', dim: 'rgba(138,127,201,0.15)' },  // soft purple
+  { color: '#7890b0', dim: 'rgba(120,144,176,0.15)' },  // steel blue
+  { color: '#a07ec9', dim: 'rgba(160,126,201,0.15)' },  // lavender
+];
+
+/* ─────────────────────────────────────────
+   State
+───────────────────────────────────────── */
+let allApps       = [];
+let searchQuery   = '';
+let categoryOrder = [];
+let accentMap     = {};
+
+/* ─────────────────────────────────────────
+   DOM refs
+───────────────────────────────────────── */
+const loadingState = document.getElementById('loadingState');
+const errorState   = document.getElementById('errorState');
+const emptyState   = document.getElementById('emptyState');
+const appGrid      = document.getElementById('appGrid');
+const searchInput  = document.getElementById('searchInput');
+const searchWrap   = document.getElementById('searchWrap');
+const refreshBtn   = document.getElementById('refreshBtn');
+const retryBtn     = document.getElementById('retryBtn');
+const lastUpdated  = document.getElementById('lastUpdated');
+const errorMessage = document.getElementById('errorMessage');
+
+/* ─────────────────────────────────────────
+   Load apps from data
+───────────────────────────────────────── */
+function loadApps(apps) {
+  if (!apps || apps.length === 0) {
+    errorMessage.textContent = 'No valid app entries found in the sheet.';
+    showState('error');
+    return;
+  }
+  allApps = apps;
+  buildCategoryMeta();
+  renderGrid();
+  lastUpdated.textContent = 'Last refreshed: ' + new Date().toLocaleTimeString();
+  buildSectionNav();
+  setupScrollHint();
+}
+
+/* ─────────────────────────────────────────
+   Refresh via google.script.run
+───────────────────────────────────────── */
+function refreshApps() {
+  showState('loading');
+  google.script.run
+    .withSuccessHandler(function(apps) { loadApps(apps); })
+    .withFailureHandler(function(err) {
+      errorMessage.textContent = err.message || 'Failed to refresh. Please try again.';
+      showState('error');
+    })
+    .getAppsData();
+}
+
+/* ─────────────────────────────────────────
+   Build category metadata (order + accents)
+───────────────────────────────────────── */
+function buildCategoryMeta() {
+  categoryOrder = [];
+  accentMap     = {};
+  var accentIdx = 0;
+  for (var i = 0; i < allApps.length; i++) {
+    var cat = allApps[i].category;
+    if (!categoryOrder.includes(cat)) {
+      categoryOrder.push(cat);
+      accentMap[cat] = ACCENTS[accentIdx % ACCENTS.length];
+      accentIdx++;
+    }
+  }
+}
+
+/* ─────────────────────────────────────────
+   Derive icon for a category label
+───────────────────────────────────────── */
+function iconForCategory(category) {
+  var key = category.toLowerCase();
+  for (var k in CATEGORY_ICONS) {
+    if (key.includes(k)) return CATEGORY_ICONS[k];
+  }
+  return CATEGORY_ICONS['default'];
+}
+
+/* ─────────────────────────────────────────
+   Render the app grid
+───────────────────────────────────────── */
+function renderGrid() {
+  appGrid.innerHTML = '';
+  var q = searchQuery.toLowerCase();
+
+  var filtered = allApps.filter(function(app) {
+    return !q || app.title.toLowerCase().includes(q) || app.category.toLowerCase().includes(q);
+  });
+
+  if (filtered.length === 0) { showState('empty'); return; }
+  showState('grid');
+
+  var visibleCats = categoryOrder.filter(function(cat) {
+    return filtered.some(function(a) { return a.category === cat; });
+  });
+
+  var byCategory = {};
+  for (var i = 0; i < filtered.length; i++) {
+    var app = filtered[i];
+    if (!byCategory[app.category]) byCategory[app.category] = [];
+    byCategory[app.category].push(app);
+  }
+
+  for (var c = 0; c < visibleCats.length; c++) {
+    var cat    = visibleCats[c];
+    var apps   = byCategory[cat] || [];
+    var accent = accentMap[cat] || ACCENTS[0];
+    var icon   = iconForCategory(cat);
+
+    var section = document.createElement('div');
+    section.className = 'category-section';
+    section.id = 'section-' + cat.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+
+    var heading = document.createElement('div');
+    heading.className = 'section-heading';
+    heading.innerHTML =
+      '<span class="section-dot" style="background:' + accent.color + '"></span>' +
+      escapeHTML(cat);
+    section.appendChild(heading);
+
+    var cardsGrid = document.createElement('div');
+    cardsGrid.className = 'cards-grid';
+    for (var j = 0; j < apps.length; j++) {
+      cardsGrid.appendChild(buildCard(apps[j], accent, icon));
+    }
+    section.appendChild(cardsGrid);
+    appGrid.appendChild(section);
+  }
+}
+
+/* ─────────────────────────────────────────
+   Build a single app card
+───────────────────────────────────────── */
+function buildCard(app, accent, icon) {
+  var a = document.createElement('a');
+  a.className = 'app-card';
+  a.href      = app.url;
+  a.target    = '_blank';
+  a.rel       = 'noopener noreferrer';
+  a.setAttribute('aria-label', 'Open ' + app.title);
+  a.style.setProperty('--accent',     accent.color);
+  a.style.setProperty('--accent-dim', accent.dim);
+  if (app.screenshot) a.dataset.screenshot = app.screenshot;
+
+  var titleHTML = searchQuery ? highlightMatch(app.title, searchQuery) : escapeHTML(app.title);
+
+  a.innerHTML =
+    '<div class="card-icon-wrap">' +
+      '<span class="material-symbols-outlined">' + icon + '</span>' +
+    '</div>' +
+    '<div class="card-body">' +
+      '<div class="card-category">' + escapeHTML(app.category) + '</div>' +
+      '<div class="card-title">'    + titleHTML                 + '</div>' +
+      (app.purpose ? '<div class="card-purpose">' + escapeHTML(app.purpose) + '</div>' : '') +
+    '</div>' +
+    '<div class="card-footer">Launch <span class="material-symbols-outlined">open_in_new</span></div>';
+
+  return a;
+}
+
+/* ─────────────────────────────────────────
+   Show / hide state panels
+───────────────────────────────────────── */
+function showState(state) {
+  loadingState.classList.add('hidden');
+  errorState.classList.add('hidden');
+  emptyState.classList.add('hidden');
+  appGrid.classList.add('hidden');
+  document.getElementById(
+    state === 'loading' ? 'loadingState' :
+    state === 'error'   ? 'errorState'   :
+    state === 'empty'   ? 'emptyState'   : 'appGrid'
+  ).classList.remove('hidden');
+}
+
+/* ─────────────────────────────────────────
+   Screenshot hover preview
+───────────────────────────────────────── */
+(function() {
+  var popup      = document.getElementById('cardPreview');
+  var popupImg   = document.getElementById('cardPreviewImg');
+  var hideTimer  = null;
+  var activeCard = null;
+  var POPUP_W    = 320;
+
+  function positionAndShow(card) {
+    var rect  = card.getBoundingClientRect();
+    var above = rect.top > 260;
+    var top   = above ? rect.top - 260 - 8 : rect.bottom + 8;
+    var left  = rect.left + rect.width / 2 - POPUP_W / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - POPUP_W - 8));
+    popup.style.top  = top  + 'px';
+    popup.style.left = left + 'px';
+    popup.classList.add('preview-visible');
+  }
+
+  function showPreview(card) {
+    var url = card.dataset.screenshot;
+    if (!url) return;
+    clearTimeout(hideTimer);
+    activeCard = card;
+    popup.querySelector('.card-preview-label').textContent =
+      card.querySelector('.card-title').textContent;
+
+    if (popupImg.dataset.loadedUrl === url) {
+      positionAndShow(card); return;
+    }
+
+    popup.classList.remove('preview-visible');
+    popupImg.onload = function() {
+      if (activeCard === card) {
+        popupImg.dataset.loadedUrl = url;
+        positionAndShow(card);
+      }
+    };
+    popupImg.onerror = function() { popupImg.dataset.loadedUrl = ''; };
+    popupImg.src = url;
+  }
+
+  function hidePreview() {
+    activeCard = null;
+    hideTimer = setTimeout(function() {
+      popup.classList.remove('preview-visible');
+    }, 100);
+  }
+
+  document.addEventListener('mouseover', function(e) {
+    var card = e.target.closest('.app-card[data-screenshot]');
+    if (card) showPreview(card);
+  });
+  document.addEventListener('mouseout', function(e) {
+    var card = e.target.closest('.app-card[data-screenshot]');
+    if (card) hidePreview();
+  });
+})();
+
+/* ─────────────────────────────────────────
+   Helpers
+───────────────────────────────────────── */
+function escapeHTML(str) {
+  if (!str) return '';
+  return str.replace(/[&<>"']/g, function(ch) {
+    return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[ch];
+  });
+}
+
+function highlightMatch(text, query) {
+  if (!query) return escapeHTML(text);
+  var escaped  = escapeHTML(text);
+  var escapedQ = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return escaped.replace(
+    new RegExp('(' + escapedQ + ')', 'gi'),
+    '<mark style="background:rgba(90,159,194,0.35);color:inherit;border-radius:2px;">$1</mark>'
+  );
+}
+
+/* ─────────────────────────────────────────
+   Section navigator + scroll spy
+───────────────────────────────────────── */
+function buildSectionNav() {
+  var nav = document.getElementById('sectionNav');
+  if (!nav) return;
+  nav.innerHTML = '';
+
+  for (var i = 0; i < categoryOrder.length; i++) {
+    var cat    = categoryOrder[i];
+    var accent = accentMap[cat] || ACCENTS[0];
+    var id     = 'section-' + cat.replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+
+    var item = document.createElement('a');
+    item.className      = 'section-nav-item';
+    item.href           = '#' + id;
+    item.dataset.target = id;
+    item.innerHTML =
+      '<span class="nav-dot" style="background:' + accent.color +
+        ';box-shadow:0 0 0 2px ' + accent.color + '33"></span>' +
+      '<span class="nav-label">' + escapeHTML(cat) + '</span>';
+
+    (function(targetId) {
+      item.addEventListener('click', function(e) {
+        e.preventDefault();
+        var el = document.getElementById(targetId);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    })(id);
+
+    nav.appendChild(item);
+  }
+
+  var navItems = nav.querySelectorAll('.section-nav-item');
+
+  function updateActiveSection() {
+    var sections    = document.querySelectorAll('.category-section[id]');
+    var currentId   = null;
+    var viewportMid = window.scrollY + window.innerHeight * 0.45;
+
+    sections.forEach(function(s) {
+      var sectionTop = s.getBoundingClientRect().top + window.scrollY;
+      if (sectionTop <= viewportMid) currentId = s.id;
+    });
+
+    if ((window.innerHeight + window.scrollY) >= document.documentElement.scrollHeight - 8 &&
+        sections.length > 0) {
+      currentId = sections[sections.length - 1].id;
+    }
+
+    navItems.forEach(function(el) {
+      el.classList.toggle('active', el.dataset.target === currentId);
+    });
+  }
+
+  window.addEventListener('scroll', updateActiveSection, { passive: true });
+  updateActiveSection();
+}
+
+/* ─────────────────────────────────────────
+   Scroll hint arrow
+───────────────────────────────────────── */
+function setupScrollHint() {
+  var hint = document.getElementById('scrollHint');
+  if (!hint) return;
+
+  if (document.documentElement.scrollHeight <= window.innerHeight + 10) {
+    hint.classList.add('hidden');
+    return;
+  }
+
+  function onScroll() {
+    if (window.scrollY > 80) {
+      hint.classList.add('hint-fade-out');
+      window.removeEventListener('scroll', onScroll);
+    }
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+}
+
+/* ─────────────────────────────────────────
+   Event listeners
+───────────────────────────────────────── */
+searchInput.addEventListener('input', function() {
+  searchQuery = searchInput.value.trim();
+  renderGrid();
+});
+
+refreshBtn.addEventListener('click', function() {
+  var icon = refreshBtn.querySelector('.material-symbols-outlined');
+  icon.classList.add('spin-once');
+  icon.addEventListener('animationend', function() {
+    icon.classList.remove('spin-once');
+  }, { once: true });
+  refreshApps();
+});
+
+retryBtn.addEventListener('click', refreshApps);
+
+/* ─────────────────────────────────────────
+   Boot — use server-injected data instantly
+───────────────────────────────────────── */
+if (INIT_ERROR) {
+  errorMessage.textContent = INIT_ERROR;
+  showState('error');
+} else {
+  loadApps(PRELOADED_APPS);
+}
+</script>
